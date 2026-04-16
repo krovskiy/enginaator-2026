@@ -21,7 +21,7 @@ async function ensureRecorder() {
     }
   };
   mediaRecorder.onstop = async () => {
-    const blob = new Blob(chunks, { type: "audio/webm" });
+    const blob = new Blob(chunks, { type: "audio/mp3" });
     chunks = [];
     await sendAudio(blob);
   };
@@ -30,7 +30,7 @@ async function ensureRecorder() {
 async function sendAudio(blob) {
   updateStatus("Transcribing...");
   const form = new FormData();
-  form.append("audio", blob, "recording.webm");
+  form.append("audio", blob, "recording.mp3");
   const language = languageSelect.value;
   if (language) {
     form.append("language", language);
