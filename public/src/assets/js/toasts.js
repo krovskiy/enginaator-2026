@@ -9,7 +9,7 @@ export function showToast({
   if (existingToast) existingToast.remove();
 
   const toast = document.createElement('div');
-  toast.className = 'toast' + (type === 'failure' ? ' toast-failure' : '');
+  toast.className = 'toast' + (type === 'failure' ? ' toast-failure' : '') + (type === 'success' ? ' toast-success' : '');
   toast.setAttribute('role', 'status');
   toast.setAttribute('aria-live', 'polite');
   toast.innerHTML =

@@ -1,5 +1,5 @@
 import { showToast } from './toasts.js';
-
+const host = 1488;
 const recordButton = document.getElementById("record_button");
 const recordStatus = document.getElementById("record_status");
 const mainCnt = document.getElementById("mainContainer");
@@ -16,7 +16,8 @@ document.getElementById("room_number").textContent =
   `Welcome back, Room nr. ${room}`;
 
 
-const socket = new WebSocket(`ws://${window.location.host}/ws?room=${room}`);
+const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws/guest/${room}`);
 
 socket.onopen = () => {
   console.log("WS connected:", room);
@@ -25,8 +26,10 @@ socket.onopen = () => {
 socket.onmessage = (event) => {
   const data = JSON.parse(event.data);
 
-  if (data.type === "status_update") {
-    renderRequest(data.payload);
+  if (data.type === "STATUS_UPDATE") {
+    updateRequestUI(data);
+  } else if (data.type === "REQUEST_CONFIRMED") {
+    renderRequest(data.request);
   }
 };
 
@@ -48,41 +51,81 @@ function updateStatus(text) {
   }
 }
 
+function updateRequestUI(payload) {
+  const requestId = payload.id || payload.request_id;
+  const existing = document.getElementById(`request-${requestId}`);
+  if (!existing) return;
+
+  const statusEl = existing.querySelector('.status-badge');
+  const etaEl = existing.querySelector('.eta-value');
+
+  const status = (payload.request_status || payload.status || "sent").toLowerCase();
+  if (statusEl) {
+    let displayStatus = status.toUpperCase();
+    if (status === 'sent') displayStatus = 'RECEIVED';
+    if (status === 'in_progress') displayStatus = 'PROCESSING';
+    
+    statusEl.textContent = displayStatus;
+    statusEl.className = `status-badge status-${status}`;
+  }
+  if (etaEl && (payload.eta || payload.eta_minutes)) {
+    etaEl.textContent = `${payload.eta || payload.eta_minutes} min`;
+  }
+}
+
 function renderRequest(payload) {
-  const existing = document.getElementById("request-something");
+  if (!payload) return;
+
+  const requestId = payload.id || payload.request_id || payload.item_id || 'new';
+  const existing = document.getElementById(`request-${requestId}`);
   if (existing) existing.remove();
 
   const wrapper = document.createElement("div");
-  wrapper.id = "request-something";
+  wrapper.id = `request-${requestId}`;
+  wrapper.className = "request-history-card-wrapper";
+
+  const requestText = payload.text_as_notes || payload.notes || payload.item_name || payload.name || "Request";
+  const status = (payload.request_status || payload.status || "sent").toLowerCase();
+  const eta = payload.eta || payload.eta_minutes || "-";
+  let displayStatus = status.toUpperCase();
+  if (status === 'sent') displayStatus = 'RECEIVED';
+  if (status === 'in_progress') displayStatus = 'PROCESSING';
+  
+  const displayEta = eta !== "-" ? `${eta} min` : "-";
 
   wrapper.innerHTML = `
-  <div class="container requestHistory">
-    <div class="container bg-accent gap-sm">
-
-      <h2 class="text-3xl font-display text-center">
-        CURRENT ORDER
-      </h2>
-
-      <div class="container bg-bright">
-        <h3>REQUEST</h3>
-        <p>${payload.text}</p>
+    <div class="request-history-card">
+      <div class="card-header">
+        <span class="order-id">ORDER #${requestId}</span>
+        <span class="status-badge status-${status}">${displayStatus}</span>
       </div>
-
-      <div class="container bg-bright">
-        <h3>STATUS</h3>
-        <p>${payload.status}</p>
+      
+      <div class="card-body">
+        <div class="request-content">
+          <label>REQUEST</label>
+          <p class="request-text">"${requestText}"</p>
+        </div>
+        
+        <div class="eta-info">
+          <label>ETA</label>
+          <p class="eta-value">${displayEta}</p>
+        </div>
       </div>
-
-      <div class="container bg-bright">
-        <h3>ETA</h3>
-        <p>${payload.eta || "-"}</p>
-      </div>
-
     </div>
-  </div>
   `;
 
   mainCnt.appendChild(wrapper);
+}
+
+async function fetchHistory() {
+  try {
+    const res = await fetch(`/api/requests/room/${room}`);
+    if (!res.ok) return;
+    const history = await res.json();
+    history.forEach(item => renderRequest(item));
+  } catch (err) {
+    console.error("Failed to fetch history:", err);
+  }
 }
 
 async function ensureRecorder() {
@@ -106,27 +149,51 @@ async function ensureRecorder() {
 async function sendAudio(blob) {
   updateStatus("Transcribing...");
 
-  const form = new FormData();
-  form.append("files", blob, "recording.webm");
-  form.append("room", room);
-
   try {
-    const response = await fetch("/api/voice_to_text", {
+    const response = await fetch(`/api/new_request?room_nr=${room}`, {
       method: "POST",
-      body: form,
+      body: blob,
     });
 
     if (!response.ok) throw new Error("Server error");
 
-    const payload = await response.json();
+    let result = await response.json();
 
-    renderRequest(payload);
+    if (result.error) {
+      showToast({ message: `Error: ${result.error}`, type: 'failure' });
+      updateStatus("Idle");
+      return;
+    }
+
+    if (Array.isArray(result) && result.length === 2 && typeof result[1] === 'number') {
+      result = result[0];
+    }
+
+    const hasAddedItems = result.items && result.items.length > 0;
+    const hasUnavailableItems = result.unavailable_items && result.unavailable_items.length > 0;
+
+    if (hasAddedItems) {
+      result.items.forEach(item => renderRequest(item));
+      showToast({ message: 'Request processed successfully', type: 'success' });
+    }
+
+    if (hasUnavailableItems) {
+      result.unavailable_items.forEach(un => {
+        const itemName = un.item?.item_name || un.item?.name || un.item || "Unknown item";
+        showToast({ message: `Unavailable: ${itemName} - ${un.reason}`, type: 'failure' });
+      });
+    }
+
+    if (!hasAddedItems && !hasUnavailableItems) {
+      showToast({ message: 'No items recognized in your request', type: 'failure' });
+    }
 
     updateStatus("Idle");
 
   } catch (err) {
     console.error(err);
-    showToast({ message: 'Transcription failed', type: 'failure' });
+    showToast({ message: `Transcription failed: ${err.message || 'Unknown error'}`, type: 'failure' });
+    updateStatus("Idle");
   }
 }
 
@@ -155,3 +222,4 @@ recordButton.addEventListener("click", async () => {
 });
 
 updateStatus("Idle");
+fetchHistory();

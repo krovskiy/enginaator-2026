@@ -1,5 +1,6 @@
-const API = "http://localhost:3000";
-const WS = "ws://localhost:3000";
+const API = "";
+const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+const WS = `${wsProtocol}//${window.location.host}/ws/staff`;
 
 let currentFilter = "all";
 
@@ -12,11 +13,11 @@ socket.onopen = () => {
 socket.onmessage = (event) => {
   const data = JSON.parse(event.data);
 
-  if (data.type === "inventory_update") {
+  if (data.type === "INVENTORY_UPDATE") {
     renderInventory();
   }
 
-  if (data.type === "request_update") {
+  if (data.type === "NEW_REQUEST" || data.type === "STATUS_UPDATE") {
     renderRequests();
     updateStats();
   }
@@ -41,7 +42,11 @@ function timeAgo(date) {
 }
 
 async function renderInventory() {
-  const res = await fetch(`${API}/inventory`);
+  const res = await fetch(`${API}/api/inventory`);
+  if (!res.ok) {
+    // Fallback if /api/inventory doesn't exist (it wasn't in main.py)
+    return;
+  }
   const inventoryItems = await res.json();
 
   const container = document.getElementById('inventoryList');
@@ -49,23 +54,31 @@ async function renderInventory() {
 
   container.innerHTML = inventoryItems.map(item => {
     let stockClass = '';
-    if (item.available <= 0) stockClass = 'out';
-    else if (item.available < item.threshold) stockClass = 'low';
+    const available = item.quantity_available !== undefined ? item.quantity_available : item.available;
+    const threshold = item.low_stock_threshold !== undefined ? item.low_stock_threshold : item.threshold;
+    const name = item.name;
+    const category = item.category;
+    const reserved = item.quantity_reserved !== undefined ? item.quantity_reserved : item.reserved;
+    const stock = item.quantity_in_stock !== undefined ? item.quantity_in_stock : item.stock;
+    const id = item.id;
+
+    if (available <= 0) stockClass = 'out';
+    else if (available < threshold) stockClass = 'low';
 
     return `
       <div class="inv-row">
         <div class="inv-info">
-          <h4>${escapeHtml(item.name)}</h4>
-          <p>${item.category}</p>
+          <h4>${escapeHtml(name)}</h4>
+          <p>${category}</p>
         </div>
         <div class="inv-stats">
           <div class="stock-number ${stockClass}">
-            ${item.available} available
+            ${available} available
           </div>
           <div style="font-size:10px;">
-            ${item.reserved} reserved · total ${item.stock}
+            ${reserved} reserved · total ${stock}
           </div>
-          <button class="restock-btn" data-id="${item.id}">
+          <button class="restock-btn" data-id="${id}">
             + Restock (+5)
           </button>
         </div>
@@ -77,7 +90,7 @@ async function renderInventory() {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
 
-      await fetch(`${API}/inventory/${id}/restock`, {
+      await fetch(`${API}/api/inventory/${id}/restock`, {
         method: "POST"
       });
     });
@@ -85,17 +98,19 @@ async function renderInventory() {
 }
 
 async function renderRequests() {
-  const res = await fetch(`${API}/requests`);
+  const res = await fetch(`${API}/api/all_requests`);
+  if (!res.ok) return;
   let requests = await res.json();
 
   const container = document.getElementById('requestsContainer');
   if (!container) return;
 
-  let filtered = requests.filter(r =>
-    currentFilter === "all" ? true : r.status === currentFilter
-  );
+  let filtered = requests.filter(r => {
+    const status = r.request_status || r.status;
+    return currentFilter === "all" ? true : (status ? status.toLowerCase() : "") === currentFilter.toLowerCase();
+  });
 
-  filtered.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+  filtered.sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
 
   if (filtered.length === 0) {
     container.innerHTML = `<div style="padding:20px;"> No requests</div>`;
@@ -103,47 +118,62 @@ async function renderRequests() {
   }
 
   container.innerHTML = filtered.map(req => {
-    const isNew = (new Date() - new Date(req.createdAt)) < 60000 && req.status === 'received';
-
-    const itemsHtml = req.items.map(it =>
-      `<span class="item-pill">${escapeHtml(it.name)} × ${it.quantity}</span>`
-    ).join('');
+    const status = req.request_status || req.status;
+    const isNew = (new Date() - new Date(req.created_at)) < 60000 && status === 'sent';
 
     return `
-      <div class="request-card">
-        <div>
-          Room ${escapeHtml(req.room)}
-          ${isNew ? '<span class="new-tag">NEW</span>' : ''}
+      <div class="request-card ${status.toLowerCase()} ${isNew ? 'new-status-animation' : ''}" id="request-${req.id || req.request_id}">
+        <div class="card-accent ${status.toLowerCase()}"></div>
+        
+        <div class="card-header">
+          <div class="room-badge">
+            Room ${escapeHtml(req.room || req.room_nr)}
+            ${isNew ? '<span class="new-tag">NEW</span>' : ''}
+          </div>
+          <div class="time-ago">${timeAgo(req.created_at)}</div>
         </div>
 
-        <div>${escapeHtml(req.category)}</div>
-        <div>“${escapeHtml(req.text.replace(/SVARA/gi, 'Trivago'))}”</div>
+        <div class="category">Order ID: ${req.id || req.request_id}</div>
+        <div class="request-text">“${escapeHtml(req.notes.replace(/SVARA/gi, 'Trivago'))}”</div>
 
-        <div>${itemsHtml}</div>
-
-        <div>
-          <span>${req.status}</span>
-
-          ${req.status === 'received' ? `
-            <button data-action="progress" data-id="${req.id}">
-              In Progress →
-            </button>
-            <button data-action="reject" data-id="${req.id}">
-              Reject
-            </button>
-          ` : ''}
-
-          ${req.status === 'in_progress' ? `
-            <button data-action="deliver" data-id="${req.id}">
-              Delivered
-            </button>
-            <button data-action="reject" data-id="${req.id}">
-              Reject
-            </button>
-          ` : ''}
+        <div class="item-pills">
+          <span class="item-pill">Amount: ${req.amount}</span>
         </div>
 
-        <div style="font-size:12px;">${timeAgo(req.createdAt)}</div>
+        <div class="card-footer">
+          <div class="status-badge ${status.toLowerCase()}">${status.replace('_', ' ')}</div>
+          
+          ${status === 'IN_PROGRESS' || status === 'sent' ? `
+            <div class="eta-controls">
+              <span class="eta-label">ETA:</span>
+              <button class="eta-btn" data-id="${req.id || req.request_id}" data-eta="5">5m</button>
+              <button class="eta-btn" data-id="${req.id || req.request_id}" data-eta="10">10m</button>
+              <button class="eta-btn" data-id="${req.id || req.request_id}" data-eta="20">20m</button>
+              <button class="eta-btn" data-id="${req.id || req.request_id}" data-eta="30">30m</button>
+              ${req.eta_minutes ? `<span class="current-eta">(${req.eta_minutes}m)</span>` : ''}
+            </div>
+          ` : ''}
+
+          <div class="action-group">
+            ${status === 'sent' ? `
+              <button class="action-btn btn-advance" data-action="IN_PROGRESS" data-id="${req.id || req.request_id}">
+                Process →
+              </button>
+              <button class="action-btn btn-reject" data-action="REJECTED" data-id="${req.id || req.request_id}">
+                Reject
+              </button>
+            ` : ''}
+
+            ${status === 'IN_PROGRESS' ? `
+              <button class="action-btn btn-done" data-action="DELIVERED" data-id="${req.id || req.request_id}">
+                Complete
+              </button>
+              <button class="action-btn btn-reject" data-action="REJECTED" data-id="${req.id || req.request_id}">
+                Reject
+              </button>
+            ` : ''}
+          </div>
+        </div>
       </div>
     `;
   }).join('');
@@ -155,16 +185,25 @@ function bindRequestActions() {
   document.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
-      const action = btn.dataset.action;
+      const status = btn.dataset.action;
 
-      let endpoint = "";
+      await fetch(`${API}/api/requests/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status })
+      });
+    });
+  });
 
-      if (action === "progress") endpoint = `/requests/${id}/progress`;
-      if (action === "deliver") endpoint = `/requests/${id}/deliver`;
-      if (action === "reject") endpoint = `/requests/${id}/reject`;
+  document.querySelectorAll('.eta-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const eta = btn.dataset.eta;
 
-      await fetch(`${API}${endpoint}`, {
-        method: "PATCH"
+      await fetch(`${API}/api/requests/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eta })
       });
     });
   });
@@ -195,12 +234,18 @@ async function addRandomDemoRequest() {
 }
 
 async function updateStats() {
-  const res = await fetch(`${API}/stats`);
-  const stats = await res.json();
+  const res = await fetch(`${API}/api/all_requests`);
+  if (!res.ok) return;
+  const requests = await res.json();
 
-  document.getElementById('statActive').innerText = stats.active;
-  document.getElementById('statDelivered').innerText = stats.delivered;
-  document.getElementById('lowStockCount').innerText = stats.lowStock;
+  const active = requests.filter(r => {
+      const status = r.request_status || r.status;
+      return ['sent', 'IN_PROGRESS'].includes(status);
+  }).length;
+  const delivered = requests.filter(r => (r.request_status || r.status) === 'DELIVERED').length;
+
+  document.getElementById('statActive').innerText = active;
+  document.getElementById('statDelivered').innerText = delivered;
 }
 
 document.querySelectorAll('.filter-pill').forEach(btn => {
@@ -208,6 +253,7 @@ document.querySelectorAll('.filter-pill').forEach(btn => {
     document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     currentFilter = btn.getAttribute('data-filter');
+    console.log("Filtering by:", currentFilter);
     renderRequests();
   });
 });

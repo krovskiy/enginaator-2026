@@ -7,9 +7,9 @@ const modelSlots = [
 ];
 
 const models = [
-	{ modelPath: "assets/models/the_megaphone.glb", scale: 0.01, texturePath: "assets/imgs/blank.png" },
-	{ modelPath: "assets/models/document_board.glb", scale: 12, texturePath: "assets/imgs/blank.png" },
-	{ modelPath: "assets/models/crossmark.glb", scale: 4, texturePath: "assets/imgs/blank.png" } 
+	{ modelPath: "/static/assets/models/the_megaphone.glb", scale: 0.01, texturePath: "/static/assets/imgs/blank.png" },
+	{ modelPath: "/static/assets/models/document_board.glb", scale: 12, texturePath: "/static/assets/imgs/blank.png" },
+	{ modelPath: "/static/assets/models/crossmark.glb", scale: 4, texturePath: "/static/assets/imgs/blank.png" } 
 ];
 
 modelSlots.forEach((slot, i) => {
