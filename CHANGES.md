@@ -1,32 +1,41 @@
 
 # Changes
 
-## [Unreleased]
-
-
-(Description - @username)
 ### Added
-- Feature description
+- Initial project definition and structure (@dima)
+- Web frontend initialization and dashboard UI (@andreas)
+- Whisper/OpenAI LLM integration for speech-to-text (@dima)
+- Custom CSS framework for all pages (@renee)
+- Model loading and viewer for tablets (@andreas)
+- Staff dashboard with live updates (@dima)
+- Room service API endpoints (FastAPI) (@dima)
 
 ### Changed
-- Modification details
+- Refactored backend to use FastAPI and async DB (@andreas)
+- Improved inventory and request management logic (@dima)
+- Updated README and project documentation (@renee)
+- Enhanced websocket handling for staff and guests (@andreas)
 
 ### Fixed
-- Bug fixes
+- Merge conflicts in pyproject and lock files (@dima)
+- Bug in modelGrid id assignment (@renee)
+- Proper ffmpeg and python-multipart dependency handling (@andreas)
 
 ### Removed
-- Deprecated features
+- Deprecated Flask API code (@andreas)
+
+---
 
 ---
 
 ## Team
 
-| Name | Role | GitHub |
-|------|------|--------|
-| Member 1 | Role | @dima |
-| Member 2 | Role | @stepan |
-| Member 3 | Role | @renee |
-| Member 4 | Role | @andreas |
+| Name           | Role                | GitHub      |
+|----------------|---------------------|-------------|
+| Dumitru Ciobanu| Frontend Developer  | @dima       |
+| Stepan Ivanov  | Backend Developer   | @stepan     |
+| Renne Zugov    | DB Developer        | @renee      |
+| Andreas Muller | Frontend Engineer   | @andreas    |
 
 
 ---
