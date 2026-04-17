@@ -7,6 +7,7 @@ app = Flask(__name__)
 
 model = WhisperModel("base", device="cpu", compute_type="int8")
 
+
 @app.post("/api/whisper")
 def api_whisper():
     if "audio" not in request.files:
@@ -28,12 +29,15 @@ def api_whisper():
             os.remove(tmp_path)
         except OSError:
             pass
-    return jsonify({
-        "ok": True,
-        "text": text,
-        "language": info.language,
-        "language_probability": info.language_probability,
-    })
+    return jsonify(
+        {
+            "ok": True,
+            "text": text,
+            "language": info.language,
+            "language_probability": info.language_probability,
+        }
+    )
+
 
 if __name__ == "__main__":
     app.run(host="localhost", port=5000)
