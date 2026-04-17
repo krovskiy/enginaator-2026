@@ -1,3 +1,7 @@
+// Notification sound for new requests
+const notifyAudio = new Audio("/static/assets/audio/notify.mp3");
+notifyAudio.volume = 0.7;
+
 const API = "";
 const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const WS = `${wsProtocol}//${window.location.host}/ws/staff`;
@@ -17,7 +21,15 @@ socket.onmessage = (event) => {
     renderInventory();
   }
 
-  if (data.type === "NEW_REQUEST" || data.type === "STATUS_UPDATE") {
+  if (data.type === "NEW_REQUEST") {
+    try {
+      notifyAudio.currentTime = 0;
+      notifyAudio.play();
+    } catch (e) {
+    }
+    renderRequests();
+    updateStats();
+  } else if (data.type === "STATUS_UPDATE") {
     renderRequests();
     updateStats();
   }

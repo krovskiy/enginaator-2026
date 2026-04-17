@@ -39,7 +39,9 @@ class SvaraDB:
         self.db_password = db_password
         self.remote_addr = remote_addr
 
-    # Using psycopg 3 AsyncConnection for true async database operations
+    """
+    Create and return an async database connection using psycopg 3.
+    """
     async def get_connection(self):
         try:
             return await psycopg.AsyncConnection.connect(
@@ -71,10 +73,13 @@ class SvaraDB:
     async def add_request(
         self, room: str, item_id: int, item_amount: int, text: str
     ) -> int | None:
-        """Reserves stock atomically and creates the request."""
+        """
+        Atomically reserve stock and create a new request.
+        Returns the request ID if successful, or None if insufficient stock.
+        """
         async with await self.get_connection() as conn:
             async with conn.cursor() as cursor:
-                # Start transaction to prevent race conditions
+                # Transaction ensures atomicity
                 await cursor.execute(
                     "SELECT quantity_available FROM inventory_items WHERE id = %s FOR UPDATE",
                     (item_id,),
@@ -82,9 +87,9 @@ class SvaraDB:
                 res = await cursor.fetchone()
 
                 if not res or res[0] < item_amount:
-                    return None  # Not enough stock available
+                    return None  # Insufficient stock
 
-                # Reserve the stock
+                # Reserve stock
                 await cursor.execute(
                     """
                                      UPDATE inventory_items
@@ -95,7 +100,7 @@ class SvaraDB:
                     (item_amount, item_amount, item_id),
                 )
 
-                # Create the request
+                # Insert new request
                 await cursor.execute(
                     """
                     INSERT INTO requests (room, item_id, amount, notes, request_status, created_at, updated_at)
@@ -115,10 +120,13 @@ class SvaraDB:
     async def update_request(
         self, id: int, request_status: str | None = None, eta_minutes: int | None = None
     ) -> None:
-        """Updates request and handles stock deduction on fulfillment or release on cancellation."""
+        """
+        Update a request's status and ETA.
+        Deducts stock if delivered, or releases reserved stock if rejected/cancelled.
+        """
         async with await self.get_connection() as conn:
             async with conn.cursor() as cursor:
-                # Fetch current request info
+                # Fetch current request
                 await cursor.execute(
                     "SELECT item_id, amount, request_status FROM requests WHERE id = %s FOR UPDATE",
                     (id,),
@@ -129,7 +137,7 @@ class SvaraDB:
 
                 item_id, amount, current_status = req
 
-                # Deduct physical stock if delivered
+                # Deduct stock if delivered
                 if request_status == "DELIVERED" and current_status != "DELIVERED":
                     await cursor.execute(
                         """
@@ -156,7 +164,7 @@ class SvaraDB:
                         (amount, amount, item_id),
                     )
 
-                # Update the request row
+                # Update request row
                 if request_status and eta_minutes:
                     await cursor.execute(
                         "UPDATE requests SET request_status=%s, eta_minutes=%s, updated_at=NOW() WHERE id=%s",
@@ -219,7 +227,9 @@ class SvaraDB:
         ]
 
     async def restock_item(self, item_id: int, amount: int = 5) -> None:
-        """Adds stock and updates availability."""
+        """
+        Add stock to an item and update its availability.
+        """
         async with await self.get_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(
